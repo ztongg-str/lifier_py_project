@@ -146,7 +146,7 @@ class ModelExporter:
             
             with open(filepath, 'wb') as f:
                 pickle.dump(best_model, f)
-            print(f"✅ Exported best model '{best_model_name}' (Score: {best_score:.4f}) to {filepath}")
+            print(f"Exported best model '{best_model_name}' (Score: {best_score:.4f}) to {filepath}")
             return filepath
         except Exception as e:
             raise RuntimeError(f"Failed to export best model: {e}")

@@ -9,13 +9,7 @@ from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier,
 from sklearn.svm import SVC
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from modules.config import SEED
-
-try:
-    from xgboost import XGBClassifier
-    _HAS_XGB = True
-except Exception:
-    XGBClassifier = None
-    _HAS_XGB = False
+from xgboost import XGBClassifier
 
 class BaseModel(ABC):
     @abstractmethod
@@ -90,34 +84,9 @@ class RandomForestModel(BaseModel):
             'f1': f1_score(y, y_pred, average='weighted')
         }
 
-class SVMModel(BaseModel):
-    def __init__(self, **kwargs):
-        self.name = 'SVM'
-        self.model = SVC(random_state=SEED, class_weight='balanced', **kwargs)
-
-    def create(self):
-        return self.model
-
-    def train(self, X, y):
-        self.model.fit(X, y)
-        return self
-
-    def predict(self, X):
-        return self.model.predict(X)
-
-    def evaluate(self, X, y):
-        y_pred = self.predict(X)
-        return {
-            'accuracy': accuracy_score(y, y_pred),
-            'precision': precision_score(y, y_pred, average='weighted'),
-            'recall': recall_score(y, y_pred, average='weighted'),
-            'f1': f1_score(y, y_pred, average='weighted')
-        }
 
 class XGBoostModel(BaseModel):
     def __init__(self, **kwargs):
-        if not _HAS_XGB:
-            raise ImportError("XGBoost not available")
         self.name = 'XGBoost'
         self.model = XGBClassifier(random_state=SEED, **kwargs)
 
@@ -168,22 +137,101 @@ class TriagePipeline:
         self._models.append(model)
 
 class ModelTrainer:
-    def __init__(self):
-        self.models = {
-            'Logistic Regression': LogisticRegression(random_state=SEED, max_iter=1000, class_weight='balanced'),
-            'Random Forest': RandomForestClassifier(random_state=SEED, class_weight='balanced'),
-            'Gradient Boosting': GradientBoostingClassifier(random_state=SEED)
-        }
-        self.ensemble = VotingClassifier(estimators=[
-            ('rf', self.models['Random Forest']),
-            ('gb', self.models['Gradient Boosting'])
-        ], voting='soft')
+    def __init__(self, include_xgboost=True):
+        self.models = {}
+        self.ensemble = None
+        
+        # Initialize using the BaseModel classes
+        self.models['Logistic Regression'] = LogisticRegressionModel()
+        self.models['Random Forest'] = RandomForestModel(n_estimators=100)
+        self.models['XGBoost'] = XGBoostModel()
+        
 
     def train_models(self, X_train, y_train):
+        """Train all individual models"""
         trained = {}
         for name, model in self.models.items():
+            print(f"Training {name}...")
             model.fit(X_train, y_train)
             trained[name] = model
-        self.ensemble.fit(X_train, y_train)
-        trained['Ensemble'] = self.ensemble
         return trained
+    
+    def create_ensemble(self, X_train, y_train, ensemble_type='voting'):
+        """Create and train an ensemble of all available models"""
+        from sklearn.ensemble import VotingClassifier, StackingClassifier
+        
+        # Prepare estimators for ensemble (only models that support predict_proba)
+        estimators = []
+        for name, model in self.models.items():
+            if hasattr(model.model, 'predict_proba'):  # Check if model supports probability
+                estimators.append((name.lower().replace(' ', '_'), model.model))
+        
+        if ensemble_type == 'voting':
+            self.ensemble = VotingClassifier(
+                estimators=estimators, 
+                voting='soft'  # Use soft voting for probability-based
+            )
+        elif ensemble_type == 'stacking':
+            from sklearn.linear_model import LogisticRegression
+            self.ensemble = StackingClassifier(
+                estimators=estimators,
+                final_estimator=LogisticRegression(random_state=SEED)
+            )
+        
+        # Train the ensemble
+        self.ensemble.fit(X_train, y_train)
+        
+        # Create a wrapper for the ensemble to match BaseModel interface
+        ensemble_wrapper = type('EnsembleModel', (BaseModel,), {
+            'name': f'Ensemble ({ensemble_type})',
+            'model': self.ensemble,
+            'create': lambda self: self.model,
+            'train': lambda self, X, y: self.model.fit(X, y) or self,
+            'predict': lambda self, X: self.model.predict(X),
+            'evaluate': lambda self, X, y: {
+                'accuracy': accuracy_score(y, self.predict(X)),
+                'precision': precision_score(y, self.predict(X), average='weighted'),
+                'recall': recall_score(y, self.predict(X), average='weighted'),
+                'f1': f1_score(y, self.predict(X), average='weighted')
+            }
+        })()
+        
+        return ensemble_wrapper
+    
+    def compare_models(self, X_train, y_train, X_test, y_test):
+        """Train all models and compare their performance"""
+        trained_models = self.train_models(X_train, y_train)
+        
+        # Add ensemble
+        ensemble_model = self.create_ensemble(X_train, y_train)
+        trained_models[ensemble_model.name] = ensemble_model
+        
+        # Evaluate all models
+        results = {}
+        for name, model in trained_models.items():
+            train_metrics = model.evaluate(X_train, y_train)
+            test_metrics = model.evaluate(X_test, y_test)
+            
+            results[name] = {
+                'train': train_metrics,
+                'test': test_metrics
+            }
+            
+        return results, trained_models
+    
+    def get_best_model(self, X_train, y_train, X_test, y_test, metric='f1'):
+        """Find the best performing model based on specified metric"""
+        results, models = self.compare_models(X_train, y_train, X_test, y_test)
+        
+        best_model_name = max(
+            results.keys(), 
+            key=lambda name: results[name]['test'][metric]
+        )
+        
+        return best_model_name, models[best_model_name], results
+
+
+
+
+## Todo:
+# Remove Kwargs, look how the dunder methods are used. also how the encapsulation still applied.

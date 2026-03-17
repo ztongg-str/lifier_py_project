@@ -98,7 +98,7 @@ class TextPreprocessor(BasePreprocessor):
         )
 
     def _clean_text(self, series: pd.Series):
-        # Friend's code logic verbatim (lowercase + clean text case-insensitive)
+        #(lowercase + clean text case-insensitive)
         return series.astype(str).str.lower().str.replace(r'[^a-z\s]', ' ', regex=True).str.strip()
 
     def fit(self, df: pd.DataFrame):
