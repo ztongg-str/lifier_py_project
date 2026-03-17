@@ -1,0 +1,6 @@
+*.pkl
+output/
+data/
+**/*__pycache__/
+venv/
+.idea/
