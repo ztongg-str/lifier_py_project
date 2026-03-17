@@ -1,3 +1,54 @@
+import pandas as pd
+from sklearn.feature_extraction.text import TfidfVectorizer
+
+# 1. Load Data
+df = pd.read_csv('/kaggle/input/competitions/triagegeist/chief_complaints.csv')
+
+print("Shape:", df.shape)
+print(df.head())
+
+# 2. Lowercase + Clean the text (case-insensitive) 
+df['complaint_clean'] = (
+    df['chief_complaint_raw']
+      .str.lower()                        # lowercase everything
+      .str.replace(r'[^a-z\s]', ' ', regex=True)  # remove punctuation/symbols
+      .str.strip()
+)
+
+# This will generate sample, just the top 5
+print("\nSample cleaned text:")
+print(df[['chief_complaint_raw', 'complaint_clean']].head(5))
+
+
+# 3. TF-IDF Vectorizer 
+tfidf = TfidfVectorizer(
+    lowercase=True,          # enforce lowercase (redundant but safe)
+    stop_words='english',    # remove common stop words (with, and, the...)
+    ngram_range=(1, 2),      # unigrams + bigrams e.g. "chest pain" as one token
+    min_df=1,                # include words that appear at least once
+    max_features=500         # top 500 most relevant terms
+)
+
+tfidf_matrix = tfidf.fit_transform(df['complaint_clean'])
+
+# 4. View All Extracted Tokens 
+feature_names = tfidf.get_feature_names_out()
+print(f"\nTotal unique tokens extracted: {len(feature_names)}")
+print("Sample tokens:", feature_names[:30])
+
+# 5. TF-IDF uses for (averaged score of each across all docs) 
+import numpy as np
+
+tfidf_scores = tfidf_matrix.toarray().mean(axis=0)
+token_df = pd.DataFrame({
+    'token': feature_names,
+    'tfidf_score': tfidf_scores
+}).sort_values('tfidf_score', ascending=False)
+
+print("\nTop 20 most significant tokens:")
+print(token_df.head(20))
+
+# 6. ESI Word Dictionary (Score 1=most dangerous → 5=least) 
 ESI_WORD_DICT = {
 
     # ── ESI LEVEL 1 — IMMEDIATE / LIFE THREATENING ──────────────────────────
@@ -511,3 +562,55 @@ ESI_LABELS = {
     4: "Less Urgent",
     5: "Non-Urgent"
 }
+
+# 7. Map ESI Score to Each Token 
+def get_esi_score(token):
+    if token in ESI_WORD_DICT:
+        return ESI_WORD_DICT[token]
+    for key, score in ESI_WORD_DICT.items():
+        if key in token or token in key: 
+            return score
+    return None   # unscored word
+
+# This is where it map to the esi score level
+token_df['esi_score'] = token_df['token'].apply(get_esi_score)
+token_df['esi_label'] = token_df['esi_score'].map(ESI_LABELS)
+
+scored_df = token_df.dropna(subset=['esi_score']).copy()
+scored_df['esi_score'] = scored_df['esi_score'].astype(int)
+
+scored_df = scored_df.sort_values(['esi_score', 'tfidf_score'], ascending=[True, False])
+
+print("\nESI-scored tokens:\n")
+print(scored_df[['token', 'tfidf_score', 'esi_score', 'esi_label']].to_string(index=False))
+
+# ── 8. Assign ESI Level per Patient ──────────────────────────────────────────
+def assign_patient_with_esi(text):
+    tokens = text.lower().split()
+    min_esi = 5
+    for token in tokens:
+        score = get_esi_score(token)
+        if score is not None and score < min_esi:
+            min_esi = score
+    # also check bigrams
+        # unigram is for one  word
+        # bigram is for two words
+    words = text.lower().split()
+    for i in range(len(words) - 1):
+        bigram = words[i] + " " + words[i+1]
+        score = get_esi_score(bigram)
+        if score < min_esi and score is not None:
+            min_esi = score
+    return min_esi
+
+df['esi_level']  = df['complaint_clean'].apply(assign_patient_with_esi)
+df['esi_label']  = df['esi_level'].map(ESI_LABELS)
+
+print("\n===Patient ESI assignments:===")
+print(df[['patient_id', 'complaint_clean', 'esi_level', 'esi_label']].to_string(index=False))
+
+# ── 9. Save Output ────────────────────────────────────────────────────────────
+df.to_csv('esi_scored_patients.csv', index=False)
+scored_df.to_csv('esi_scored_tokens.csv', index=False)
+
+print("\n✅ Saved: esi_scored_patients.csv & esi_scored_tokens.csv")

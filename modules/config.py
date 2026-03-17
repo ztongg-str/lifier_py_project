@@ -26,5 +26,33 @@ TFIDF_MAX_FEATURES = 100
 SELECT_K_BEST = 50
 SMOTE_K_NEIGHBORS = 5
 
+# Additional defaults used by OOP pipeline
+BP_COLS = ['systolic_bp', 'diastolic_bp']
+KEY_VITALS = ['systolic_bp', 'diastolic_bp', 'heart_rate', 'temperature_c', 'spo2', 'respiratory_rate']
+N_FEATURES_SELECT = SELECT_K_BEST
+TEST_SIZE = 0.2
+LEAKAGE_COLS = ['ed_los_hours', 'disposition']
+
+# Model hyperparameters for ModelTrainer
+LR_PARAMS = {
+    'random_state': SEED,
+    'max_iter': 1000,
+    'class_weight': 'balanced'
+}
+
+RF_PARAMS = {
+    'n_estimators': 100,
+    'random_state': SEED,
+    'class_weight': 'balanced',
+    'n_jobs': -1
+}
+
+GB_PARAMS = {
+    'n_estimators': 100,
+    'random_state': SEED,
+    'learning_rate': 0.1,
+    'max_depth': 5
+}
+
 # Visualization
 SAVE_FIG = True
