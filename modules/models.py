@@ -5,50 +5,96 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, VotingClassifier
-from sklearn.svm import SVC
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from modules.config import SEED
 from xgboost import XGBClassifier
+from sklearn.ensemble import VotingClassifier, StackingClassifier
 
 class BaseModel(ABC):
+    """Abstract base class for machine learning models."""
+
     @abstractmethod
     def create(self):
+        """Create and return the model instance."""
         raise NotImplementedError()
 
     @abstractmethod
     def train(self, X, y):
+        """Train the model on given data."""
         raise NotImplementedError()
 
     @abstractmethod
     def predict(self, X):
+        """Make predictions on given data."""
         raise NotImplementedError()
 
     @abstractmethod
     def evaluate(self, X, y):
+        """Evaluate model performance on given data."""
         raise NotImplementedError()
 
     def fit(self, X, y):
+        """Fit the model (create and train)."""
         self.model = self.create()
         self.train(X, y)
         return self
 
+    def __str__(self):
+        """String representation of the model."""
+        return f"{self.name} ({self.__class__.__name__})"
+
+    def __repr__(self):
+        """Detailed string representation of the model."""
+        return f"{self.__class__.__name__}(name='{self.name}')"
+
 class LogisticRegressionModel(BaseModel):
+    """Logistic Regression model implementation."""
+
     def __init__(self, **kwargs):
+        """Initialize Logistic Regression model.
+
+        Args:
+            **kwargs: Additional arguments for LogisticRegression.
+        """
         self.name = 'LogisticRegression'
         self.model = LogisticRegression(random_state=SEED, class_weight='balanced', max_iter=1000, **kwargs)
 
     def create(self):
+        """Create LogisticRegression model instance."""
         return self.model
 
     def train(self, X, y):
+        """Train the LogisticRegression model.
+
+        Args:
+            X: Training features.
+            y: Training labels.
+        """
         self.model.fit(X, y)
         return self
 
     def predict(self, X):
+        """Make predictions with LogisticRegression.
+
+        Args:
+            X: Input features.
+
+        Returns:
+            Predictions.
+        """
         return self.model.predict(X)
 
     def evaluate(self, X, y):
+        """Evaluate LogisticRegression performance.
+
+        Args:
+            X: Test features.
+            y: True labels.
+
+        Returns:
+            Dict of evaluation metrics.
+        """
         y_pred = self.predict(X)
         return {
             'accuracy': accuracy_score(y, y_pred),
@@ -58,24 +104,56 @@ class LogisticRegressionModel(BaseModel):
         }
 
     def __str__(self):
+        """String representation of the model."""
         return f"{self.name} (penalty={getattr(self.model, 'penalty', None)})"
 
 class RandomForestModel(BaseModel):
+    """Random Forest model implementation."""
+
     def __init__(self, **kwargs):
+        """Initialize Random Forest model.
+
+        Args:
+            **kwargs: Additional arguments for RandomForestClassifier.
+        """
         self.name = 'RandomForest'
         self.model = RandomForestClassifier(random_state=SEED, class_weight='balanced', **kwargs)
 
     def create(self):
+        """Create RandomForestClassifier model instance."""
         return self.model
 
     def train(self, X, y):
+        """Train the RandomForest model.
+
+        Args:
+            X: Training features.
+            y: Training labels.
+        """
         self.model.fit(X, y)
         return self
 
     def predict(self, X):
+        """Make predictions with RandomForest.
+
+        Args:
+            X: Input features.
+
+        Returns:
+            Predictions.
+        """
         return self.model.predict(X)
 
     def evaluate(self, X, y):
+        """Evaluate RandomForest performance.
+
+        Args:
+            X: Test features.
+            y: True labels.
+
+        Returns:
+            Dict of evaluation metrics.
+        """
         y_pred = self.predict(X)
         return {
             'accuracy': accuracy_score(y, y_pred),
@@ -86,21 +164,52 @@ class RandomForestModel(BaseModel):
 
 
 class XGBoostModel(BaseModel):
+    """XGBoost model implementation."""
+
     def __init__(self, **kwargs):
+        """Initialize XGBoost model.
+
+        Args:
+            **kwargs: Additional arguments for XGBClassifier.
+        """
         self.name = 'XGBoost'
         self.model = XGBClassifier(random_state=SEED, **kwargs)
 
     def create(self):
+        """Create XGBClassifier model instance."""
         return self.model
 
     def train(self, X, y):
+        """Train the XGBoost model.
+
+        Args:
+            X: Training features.
+            y: Training labels.
+        """
         self.model.fit(X, y)
         return self
 
     def predict(self, X):
+        """Make predictions with XGBoost.
+
+        Args:
+            X: Input features.
+
+        Returns:
+            Predictions.
+        """
         return self.model.predict(X)
 
     def evaluate(self, X, y):
+        """Evaluate XGBoost performance.
+
+        Args:
+            X: Test features.
+            y: True labels.
+
+        Returns:
+            Dict of evaluation metrics.
+        """
         y_pred = self.predict(X)
         return {
             'accuracy': accuracy_score(y, y_pred),
@@ -108,36 +217,11 @@ class XGBoostModel(BaseModel):
             'recall': recall_score(y, y_pred, average='weighted'),
             'f1': f1_score(y, y_pred, average='weighted')
         }
-
-class TriagePipeline:
-    def __init__(self, preprocessors, feature_builder, models=None):
-        self._preprocessors = preprocessors
-        self._feature_builder = feature_builder
-        self._models = models or []
-
-    def run(self, df: pd.DataFrame):
-        for p in self._preprocessors:
-            p.fit(df)
-        X = self._feature_builder.build(df)
-        return X
-
-    def __len__(self):
-        return len(self._preprocessors)
-
-    def __iter__(self):
-        return iter(self._preprocessors)
-
-    def __call__(self, df: pd.DataFrame):
-        return self.run(df)
-
-    def __repr__(self):
-        return f"TriagePipeline with {len(self._preprocessors)} preprocessors and {len(self._models)} models"
-
-    def add_model(self, model: BaseModel):
-        self._models.append(model)
-
 class ModelTrainer:
-    def __init__(self, include_xgboost=True):
+    """Manages training of multiple ML models."""
+
+    def __init__(self):
+        """Initialize ModelTrainer with default models."""
         self.models = {}
         self.ensemble = None
         
@@ -148,7 +232,15 @@ class ModelTrainer:
         
 
     def train_models(self, X_train, y_train):
-        """Train all individual models"""
+        """Train all individual models.
+
+        Args:
+            X_train: Training features.
+            y_train: Training labels.
+
+        Returns:
+            Dict of trained models.
+        """
         trained = {}
         for name, model in self.models.items():
             print(f"Training {name}...")
@@ -157,8 +249,6 @@ class ModelTrainer:
         return trained
     
     def create_ensemble(self, X_train, y_train, ensemble_type='voting'):
-        """Create and train an ensemble of all available models"""
-        from sklearn.ensemble import VotingClassifier, StackingClassifier
         
         # Prepare estimators for ensemble (only models that support predict_proba)
         estimators = []
@@ -167,19 +257,18 @@ class ModelTrainer:
                 estimators.append((name.lower().replace(' ', '_'), model.model))
         
         if ensemble_type == 'voting':
-            self.ensemble = VotingClassifier(
+            ensemble = VotingClassifier(
                 estimators=estimators, 
                 voting='soft'  # Use soft voting for probability-based
             )
         elif ensemble_type == 'stacking':
             from sklearn.linear_model import LogisticRegression
-            self.ensemble = StackingClassifier(
+            ensemble = StackingClassifier(
                 estimators=estimators,
                 final_estimator=LogisticRegression(random_state=SEED)
-            )
-        
+            ) 
         # Train the ensemble
-        self.ensemble.fit(X_train, y_train)
+        ensemble.fit(X_train, y_train)
         
         # Create a wrapper for the ensemble to match BaseModel interface
         ensemble_wrapper = type('EnsembleModel', (BaseModel,), {
@@ -229,9 +318,3 @@ class ModelTrainer:
         )
         
         return best_model_name, models[best_model_name], results
-
-
-
-
-## Todo:
-# Remove Kwargs, look how the dunder methods are used. also how the encapsulation still applied.

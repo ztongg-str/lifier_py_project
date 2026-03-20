@@ -7,20 +7,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, classification_report, confusion_matrix
-from sklearn.model_selection import cross_val_score
+from sklearn.metrics import roc_curve, auc
 from modules.config import IMG_PATH
-
-class BaseVisualizer(ABC):
-    @abstractmethod
-    def plot(self, *args, **kwargs):
-        raise NotImplementedError()
-
-class ModelVisualizer(BaseVisualizer):
-    def plot(self, *args, **kwargs):
-        # Placeholder
-        pass
-
+import pickle
+import os
 def plot_confusion_matrix_percentages(cm, model_name):
+    """Plot confusion matrix as percentages.
+
+    Args:
+        cm: Confusion matrix array.
+        model_name: Name of the model for plot title.
+    """
     cm_percentage = cm.astype('float') / cm.sum() * 100
     plt.figure(figsize=(8, 6))
     sns.heatmap(cm_percentage, annot=True, fmt='.1f', cmap='Blues')
@@ -31,7 +28,13 @@ def plot_confusion_matrix_percentages(cm, model_name):
     plt.show()
 
 def plot_roc_curves(y_probas, model_names, y_test):
-    from sklearn.metrics import roc_curve, auc
+    """Plot ROC curves for multiple models.
+
+    Args:
+        y_probas: List of prediction probabilities.
+        model_names: List of model names.
+        y_test: True labels.
+    """
     plt.figure(figsize=(10, 8))
     for y_proba, name in zip(y_probas, model_names):
         if len(np.unique(y_test)) == 2:
@@ -54,10 +57,24 @@ def plot_roc_curves(y_probas, model_names, y_test):
     plt.show()
 
 class ModelEvaluator:
+    """Evaluates machine learning models with metrics and visualizations."""
+
     def __init__(self):
+        """Initialize ModelEvaluator."""
         self.results = []
 
     def evaluate_model(self, model, X_test, y_test, model_name):
+        """Evaluate a single model.
+
+        Args:
+            model: Trained model instance.
+            X_test: Test features.
+            y_test: Test labels.
+            model_name: Name of the model.
+
+        Returns:
+            Dict of evaluation metrics.
+        """
         y_pred = model.predict(X_test)
         y_proba = None
         if hasattr(model, 'predict_proba'):
@@ -68,12 +85,10 @@ class ModelEvaluator:
                 auc = roc_auc_score(y_test, y_proba, multi_class='ovr')
         else:
             auc = None
-
         acc = accuracy_score(y_test, y_pred)
         prec = precision_score(y_test, y_pred, average='weighted')
         rec = recall_score(y_test, y_pred, average='weighted')
         f1 = f1_score(y_test, y_pred, average='weighted')
-
         result = {
             'Model': model_name,
             'Accuracy': acc,
@@ -83,18 +98,25 @@ class ModelEvaluator:
             'ROC-AUC': auc
         }
         self.results.append(result)
-
         # Confusion matrix
         cm = confusion_matrix(y_test, y_pred)
         plot_confusion_matrix_percentages(cm, model_name)
-
         # Classification report
         print(f"Classification Report for {model_name}:")
         print(classification_report(y_test, y_pred))
-
         return result
 
     def evaluate_models(self, models, X_test, y_test):
+        """Evaluate multiple models.
+
+        Args:
+            models: Dict of trained models.
+            X_test: Test features.
+            y_test: Test labels.
+
+        Returns:
+            DataFrame of evaluation results.
+        """
         results = []
         y_probas = []
         model_names = []
@@ -113,12 +135,19 @@ class ModelEvaluator:
 
 class ModelExporter:
     """Object-oriented model exporter to rank and save models."""
+
     def __init__(self, output_dir=None):
+        """Initialize ModelExporter.
+
+        Args:
+            output_dir: Directory to save models. Defaults to 'output'.
+        """
         import os
         self._output_dir = output_dir or os.path.join("output")
         self._ensure_dir()
 
     def _ensure_dir(self):
+        """Ensure output directory exists."""
         import os
         try:
             if not os.path.exists(self._output_dir):
@@ -127,23 +156,27 @@ class ModelExporter:
             print(f"Error creating output directory: {e}")
 
     def export_best_model(self, models_dict, results_df, metric='F1-Score'):
-        import pickle
-        import os
+        """Export the best performing model.
+
+        Args:
+            models_dict: Dict of trained models.
+            results_df: DataFrame with evaluation results.
+            metric: Metric to rank models by.
+
+        Returns:
+            Path to saved model file.
+        """
         try:
             if results_df.empty:
                 raise ValueError("Results dataframe is empty.")
-            
             # Rank models by metric in descending order
             ranked_df = results_df.sort_values(by=metric, ascending=False)
             best_model_name = ranked_df.iloc[0]['Model']
             best_score = ranked_df.iloc[0][metric]
-            
             best_model = models_dict.get(best_model_name)
             if best_model is None:
                 raise ValueError(f"Best model '{best_model_name}' not found in models dictionary.")
-            
-            filepath = os.path.join(self._output_dir, "best_model_ranked.pkl")
-            
+            filepath = os.path.join(self._output_dir, "best_model_ranked.pkl")  
             with open(filepath, 'wb') as f:
                 pickle.dump(best_model, f)
             print(f"Exported best model '{best_model_name}' (Score: {best_score:.4f}) to {filepath}")

@@ -1,5 +1,4 @@
-# config.py
-# Configuration settings for the project
+# This file is for configuring variables that will be static and used throughout the project.
 
 import os
 
@@ -8,13 +7,12 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), "..","data")
 IMG_PATH = os.path.join(os.path.dirname(__file__), "..","image")
 if not os.path.exists(IMG_PATH):
     os.makedirs(IMG_PATH)
-
-# Constants
+# Constants for data environment
 SEED = 42
+# Columns to remove initially
 TARGET = "triage_acuity"
 PATIENT_ID = "patient_id"
-
-# File names
+# File names to read
 CHIEF_COMPLAINT_FILENAME = "chief_complaints.csv"
 PATIENT_HISTORY_FILENAME = "patient_history.csv"
 SAMPLE_SUBMISSION_FILENAME = "sample_submission.csv"
@@ -27,11 +25,9 @@ SELECT_K_BEST = 50
 SMOTE_K_NEIGHBORS = 5
 
 # Additional defaults used by OOP pipeline
-BP_COLS = ['systolic_bp', 'diastolic_bp']
-KEY_VITALS = ['systolic_bp', 'diastolic_bp', 'heart_rate', 'temperature_c', 'spo2', 'respiratory_rate']
 N_FEATURES_SELECT = SELECT_K_BEST
 TEST_SIZE = 0.2
-LEAKAGE_COLS = ['ed_los_hours', 'disposition']
+LEAKAGE_COLS = ['ed_los_hours', 'disposition',"news2_score"]
 
 # Model hyperparameters for ModelTrainer
 LR_PARAMS = {

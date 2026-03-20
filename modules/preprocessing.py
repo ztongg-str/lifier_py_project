@@ -1,94 +1,205 @@
 # preprocessing.py
 # Combined module for data preprocessing, feature building, and related utilities
-
 from abc import ABC, abstractmethod
 import pandas as pd
 import numpy as np
-from sklearn.preprocessing import StandardScaler, LabelEncoder, OneHotEncoder
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.impute import SimpleImputer
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.feature_selection import SelectKBest, f_classif, SelectFromModel
-from sklearn.ensemble import RandomForestClassifier
 from imblearn.over_sampling import SMOTE
 from modules.config import *
-import re
-import json
 
 class BasePreprocessor(ABC):
-    """Abstract Base Class for OOP preprocessors"""
+    """Abstract Base Class for OOP preprocessors with common interface."""
+
     @abstractmethod
     def fit(self, df: pd.DataFrame):
+        """Fit the preprocessor to the data.
+
+        Args:
+            df (pd.DataFrame): Input dataframe to fit on.
+        """
         raise NotImplementedError()
 
     @abstractmethod
     def transform(self, df: pd.DataFrame):
-        raise NotImplementedError()
-        
-    def __repr__(self):
-        return f"<{self.__class__.__name__}>"
+        """Transform the data using fitted parameters.
 
-class BaseFeatureBuilder(ABC):
-    """Abstract Base Class for OOP Feature Builders"""
-    @abstractmethod
-    def build(self, df: pd.DataFrame):
+        Args:
+            df (pd.DataFrame): Input dataframe to transform.
+
+        Returns:
+            Transformed data (type depends on implementation).
+        """
         raise NotImplementedError()
-        
+
+    def __str__(self):
+        """String representation of the preprocessor."""
+        return f"{self.__class__.__name__}()"
+
     def __repr__(self):
-        return f"<{self.__class__.__name__}>"
+        """Detailed string representation of the preprocessor."""
+        return f"{self.__class__.__name__}()"
+
 
 class NumericalPreprocessor(BasePreprocessor):
-    def __init__(self, num_cols=None):
-        self._num_cols = num_cols or KEY_VITALS + BP_COLS + ['age', 'weight_kg', 'height_cm', 'bmi', 'shock_index', 'news2_score', 'pain_score', 'gcs_total']
+    """Preprocessor for numerical features with outlier clipping and scaling."""
+
+    def __init__(self):
+        """Initialize the numerical preprocessor."""
+        self._num_cols = None
         self._scaler = StandardScaler()
-        self._imputer = SimpleImputer(strategy='mean')
+        self._imputer = SimpleImputer(strategy='constant', fill_value=0)
+        self.lower_bounds = None
+        self.upper_bounds = None
 
     def fit(self, df: pd.DataFrame):
+        """Fit the numerical preprocessor.
+
+        Args:
+            df (pd.DataFrame): Input dataframe with numerical columns.
+        """
         try:
+            # Exclude post-triage/leakage fields
+            leak_cols = {'ed_los_hours', 'triage_acuity'}
+            self._num_cols = [c for c in df.select_dtypes(include='number').columns if c not in leak_cols]
             num_data = df[self._num_cols]
-            self._imputer.fit(num_data)
-            imputed = self._imputer.transform(num_data)
+            self.lower_bounds = num_data.quantile(0.05)
+            self.upper_bounds = num_data.quantile(0.95)
+            clipped = num_data.clip(self.lower_bounds, self.upper_bounds, axis=1)
+            imputed = self._imputer.fit_transform(clipped)
             self._scaler.fit(imputed)
         except KeyError as e:
             raise KeyError(f"Missing numerical columns in data: {e}")
 
     def transform(self, df: pd.DataFrame):
+        """Transform numerical data.
+
+        Args:
+            df (pd.DataFrame): Input dataframe.
+
+        Returns:
+            np.ndarray: Scaled and imputed numerical features.
+        """
         try:
-            num_data = df[self._num_cols]
-            imputed = self._imputer.transform(num_data)
+            num_data = df.reindex(columns=self._num_cols).copy()
+            missing_cols = [c for c in self._num_cols if c not in num_data.columns]
+            for c in missing_cols:
+                num_data[c] = 0
+            clipped = num_data.clip(self.lower_bounds, self.upper_bounds, axis=1)
+            imputed = self._imputer.transform(clipped)
             scaled = self._scaler.transform(imputed)
-            return pd.DataFrame(scaled, columns=self._num_cols, index=df.index)
+            return scaled
         except Exception as e:
             raise RuntimeError(f"Error during numerical transformation: {e}")
-
+        
 class CategoricalPreprocessor(BasePreprocessor):
-    def __init__(self, cat_cols=None):
-        self._cat_cols = cat_cols or ['sex', 'language', 'insurance_type', 'transport_origin', 'pain_location', 'mental_status_triage', 'shift', 'arrival_season', 'arrival_mode']
+    """Preprocessor for categorical features using one-hot encoding."""
+
+    def __init__(self, max_categories=50, exclude_patterns=None):
+        """Initialize the categorical preprocessor."""
+        self.max_categories = max_categories
+        self.exclude_patterns = exclude_patterns or ['*_id', '*_raw']
+        self._cat_cols = None
         self._encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
-        self._imputer = SimpleImputer(strategy='most_frequent')
+        self._imputer = SimpleImputer(strategy='constant', fill_value='unknown')
+
+    def _should_encode_column(self, col_name, unique_count):
+        """Determine if a column should be one-hot encoded.
+
+        Args:
+            col_name: Column name.
+            unique_count: Number of unique values.
+
+        Returns:
+            bool: Whether to encode the column.
+        """
+        # Check exclude patterns
+        for pattern in self.exclude_patterns:
+            if pattern.endswith('*'):
+                if col_name.startswith(pattern[:-1]):
+                    return False
+            elif pattern.startswith('*'):
+                if col_name.endswith(pattern[1:]):
+                    return False
+            elif col_name == pattern:
+                return False
+
+        # Remove known post-triage targets/leakage columns
+        if col_name in {'disposition'}:
+            return False
+        return unique_count <= self.max_categories
 
     def fit(self, df: pd.DataFrame):
+        """Fit the categorical preprocessor.
+
+        Args:
+            df (pd.DataFrame): Input dataframe with categorical columns.
+        """
+        print("CategoricalPreprocessor.fit() START")
         try:
+            all_cat_cols = df.select_dtypes(include='object').columns
+            self._cat_cols = []
+
+            print(f"CategoricalPreprocessor: Found {len(all_cat_cols)} categorical columns: {list(all_cat_cols)}")
+
+            for col in all_cat_cols:
+                unique_count = df[col].nunique()
+                if self._should_encode_column(col, unique_count):
+                    self._cat_cols.append(col)
+
+            print(f"CategoricalPreprocessor: selected {len(self._cat_cols)} categorical columns")
+
+            if not self._cat_cols:
+                print("Warning: No categorical columns selected for encoding")
+                return
+
             cat_data = df[self._cat_cols]
             self._imputer.fit(cat_data)
             imputed = self._imputer.transform(cat_data)
             self._encoder.fit(imputed)
+            print(f"CategoricalPreprocessor: Successfully fitted on {len(self._cat_cols)} columns")
         except KeyError as e:
             raise KeyError(f"Missing categorical columns in data: {e}")
+        print("CategoricalPreprocessor.fit() END")
 
     def transform(self, df: pd.DataFrame):
+        """Transform categorical data.
+
+        Args:
+            df (pd.DataFrame): Input dataframe.
+
+        Returns:
+            np.ndarray: One-hot encoded categorical features.
+        """
         try:
-            cat_data = df[self._cat_cols]
+            if not self._cat_cols:
+                return np.empty((df.shape[0], 0))
+
+            cat_data = df.reindex(columns=self._cat_cols).copy()
+            cat_data.fillna('unknown', inplace=True)
+            # In case columns are missing in new data, fill with unknown before encoding
+            for c in self._cat_cols:
+                if c not in cat_data.columns:
+                    cat_data[c] = 'unknown'
+
             imputed = self._imputer.transform(cat_data)
             encoded = self._encoder.transform(imputed)
-            feature_names = self._encoder.get_feature_names_out(self._cat_cols)
-            return pd.DataFrame(encoded, columns=feature_names, index=df.index)
+            return encoded
         except Exception as e:
             raise RuntimeError(f"Error during categorical transformation: {e}")
 
 class TextPreprocessor(BasePreprocessor):
+    """Preprocessor for text features using TF-IDF vectorization."""
+
     def __init__(self, text_col='chief_complaint_raw', max_features=500):
+        """Initialize the text preprocessor.
+
+        Args:
+            text_col (str): Name of the text column.
+            max_features (int): Maximum number of features for TF-IDF.
+        """
         self._text_col = text_col
-        # Encapsulation: Adapted exactly from friend's setup
         self._tfidf = TfidfVectorizer(
             lowercase=True,
             stop_words='english',
@@ -98,139 +209,107 @@ class TextPreprocessor(BasePreprocessor):
         )
 
     def _clean_text(self, series: pd.Series):
-        #(lowercase + clean text case-insensitive)
+        """Clean text data by lowercasing and removing non-alphanumeric characters.
+
+        Args:
+            series (pd.Series): Text series to clean.
+
+        Returns:
+            pd.Series: Cleaned text series.
+        """
         return series.astype(str).str.lower().str.replace(r'[^a-z\s]', ' ', regex=True).str.strip()
 
     def fit(self, df: pd.DataFrame):
+        """Fit the text preprocessor.
+
+        Args:
+            df (pd.DataFrame): Input dataframe with text column.
+        """
         try:
             texts = self._clean_text(df[self._text_col].fillna(''))
-            self._tfidf.fit(texts)
+            self._tfidf.fit(texts.tolist())
         except KeyError:
             raise KeyError(f"Missing text column {self._text_col} in fit")
 
     def transform(self, df: pd.DataFrame):
+        """Transform text data.
+
+        Args:
+            df (pd.DataFrame): Input dataframe.
+
+        Returns:
+            np.ndarray: TF-IDF transformed text features.
+        """
         try:
             texts = self._clean_text(df[self._text_col].fillna(''))
-            return self._tfidf.transform(texts)
+            return self._tfidf.transform(texts.tolist()).toarray()
         except Exception as e:
             raise RuntimeError(f"Error during text transformation: {e}")
 
-class FeatureBuilder(BaseFeatureBuilder):
+
+class ClassImbalanceHandler:
+    """Handles class imbalance in the target variable using SMOTE."""
+
+    def __init__(self, k_neighbors=None, random_state=42):
+        """Initialize the imbalance handler.
+
+        Args:
+            k_neighbors (int, optional): Number of neighbors for SMOTE.
+            random_state (int): Random state for reproducibility.
+        """
+        self.k_neighbors = k_neighbors or SMOTE_K_NEIGHBORS
+        self.random_state = random_state
+        self._smote = SMOTE(k_neighbors=self.k_neighbors, random_state=self.random_state)
+
+    def fit_resample(self, X, y):
+        """Balance the dataset using SMOTE.
+
+        Args:
+            X: Feature array.
+            y: Target array.
+
+        Returns:
+            tuple: Resampled X and y arrays.
+        """
+        try:
+            X_resampled, y_resampled = self._smote.fit_resample(X, y)
+            return X_resampled, y_resampled
+        except Exception as e:
+            raise RuntimeError(f"Error during SMOTE resampling: {e}")
+
+
+class FeatureBuilder:
+    """Combines multiple preprocessors to build feature matrices."""
+
     def __init__(self, preprocessors):
+        """Initialize with list of preprocessors.
+
+        Args:
+            preprocessors (list): List of BasePreprocessor instances.
+        """
         self._preprocessors = preprocessors
-        # Load ESI dictionary from JSON file
-        with open('data/esi_dictionary.json', 'r') as f:
-            esi_data = json.load(f)
-        self._esi_dict = esi_data['ESI_WORD_DICT']
-        self._esi_labels = esi_data['ESI_LABELS']
 
-    def build(self, df: pd.DataFrame):
-        try:
-            features = []
-            for p in self._preprocessors:
-                # Fit if not fitted and has fit method
-                if hasattr(p, 'fit') and not hasattr(p, '_is_fitted'):
-                    p.fit(df)
-                    p._is_fitted = True
-                
-                if isinstance(p, TextPreprocessor):
-                    text_features = p.transform(df)
-                    features.append(text_features.toarray() if hasattr(text_features, 'toarray') else text_features)
-                else:
-                    features.append(p.transform(df))
+    def fit(self, df):
+        """Fit all preprocessors.
 
-            X = np.hstack(features)
+        Args:
+            df (pd.DataFrame): Input dataframe.
+        """
+        print(f"FeatureBuilder.fit() called with {len(self._preprocessors)} preprocessors")
+        for i, p in enumerate(self._preprocessors):
+            print(f"Fitting preprocessor {i}: {type(p).__name__}")
+            p.fit(df)
+            print(f"Preprocessor {i} fit completed")
+        print("FeatureBuilder.fit() completed")
 
-            # Add ESI word scores precisely like friend's code
-            chief_complaints = df['chief_complaint_raw'].fillna('').astype(str).str.lower().str.replace(r'[^a-z\s]', ' ', regex=True).str.strip()
-            esi_scores = chief_complaints.apply(self._calculate_esi_score)
-            
-            X = np.hstack([X, esi_scores.values.reshape(-1, 1)])
-            return X
-        except Exception as e:
-            raise RuntimeError(f"Error in feature building: {e}")
+    def transform(self, df):
+        """Transform data using all preprocessors and concatenate features.
 
-    def _get_esi_score_for_token(self, token):
-        if token in self._esi_dict:
-            return self._esi_dict[token]
-        for key, score in self._esi_dict.items():
-            if key in token or token in key:
-                return score
-        return None
+        Args:
+            df (pd.DataFrame): Input dataframe.
 
-    def _calculate_esi_score(self, text):
-        tokens = text.lower().split()
-        min_esi = 5
-        
-        # Check unigrams
-        for token in tokens:
-            score = self._get_esi_score_for_token(token)
-            if score is not None and score < min_esi:
-                min_esi = score
-                
-        # Check bigrams
-        for i in range(len(tokens) - 1):
-            bigram = tokens[i] + " " + tokens[i+1]
-            score = self._get_esi_score_for_token(bigram)
-            if score is not None and score < min_esi:
-                min_esi = score
-                
-        return min_esi
-
-    def __add__(self, other):
-        # Dunder method for easy concatenation of builders
-        if isinstance(other, FeatureBuilder):
-            combined_preprocessors = self._preprocessors + other._preprocessors
-            return FeatureBuilder(combined_preprocessors)
-        raise TypeError("Can only add FeatureBuilder instances")
-
-class DataProcessorOOP:
-    """Orchestrates data processing pipelines"""
-    def __init__(self):
-        self._imputer = SimpleImputer(strategy='mean')
-        self._smote = SMOTE(random_state=SEED, k_neighbors=SMOTE_K_NEIGHBORS)
-        self._selector = SelectKBest(score_func=f_classif, k=N_FEATURES_SELECT)
-
-    def process(self, X_train, X_test, y_train):
-        try:
-            # Impute
-            self._imputer.fit(X_train)
-            X_train_imputed = self._imputer.transform(X_train)
-            X_test_imputed = self._imputer.transform(X_test)
-
-            # Ensure same columns
-            if X_train_imputed.shape[1] != X_test_imputed.shape[1]:
-                min_cols = min(X_train_imputed.shape[1], X_test_imputed.shape[1])
-                X_train_imputed = X_train_imputed[:, :min_cols]
-                X_test_imputed = X_test_imputed[:, :min_cols]
-
-            # Feature selection
-            self._selector.fit(X_train_imputed, y_train)
-            X_train_selected = self._selector.transform(X_train_imputed)
-            X_test_selected = self._selector.transform(X_test_imputed)
-
-            # SMOTE
-            X_train_smote, y_train_smote = self._smote.fit_resample(X_train_selected, y_train)
-
-            return X_train_smote, X_test_selected, y_train_smote
-        except Exception as e:
-            raise RuntimeError(f"Error executing complete DataProcessor pipeline: {e}")
-
-class FeatureSelector:
-    def __init__(self):
-        self.selector_kbest = SelectKBest(score_func=f_classif, k=SELECT_K_BEST)
-        self.selector_sfm = None
-
-    def select_features(self, X, y):
-        try:
-            X_kbest = self.selector_kbest.fit_transform(X, y)
-            rf = RandomForestClassifier(n_estimators=100, random_state=SEED)
-            self.selector_sfm = SelectFromModel(rf, threshold='median')
-            X_selected = self.selector_sfm.fit_transform(X_kbest, y)
-            return X_selected
-        except Exception as e:
-            raise RuntimeError(f"Error in feature selection: {e}")
-
-    def transform(self, X):
-        X_kbest = self.selector_kbest.transform(X)
-        return self.selector_sfm.transform(X_kbest)
+        Returns:
+            np.ndarray: Concatenated feature matrix.
+        """
+        features = [p.transform(df) for p in self._preprocessors]
+        return np.hstack(features)
