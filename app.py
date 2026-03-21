@@ -241,6 +241,14 @@ def create_demo():
                     results_table = gr.Dataframe(label="Prediction Results", interactive=False)
                     summary_text = gr.Textbox(label="Summary", lines=5, interactive=False)
             
+            # Update results when dropdown selection changes
+            sample_selector.change(
+                fn=predict_from_sample,
+                inputs=[sample_selector, gr.State(predictor)],
+                outputs=[results_table, summary_text]
+            )
+            
+            # Keep the button for manual refresh
             load_btn.click(
                 fn=predict_from_sample,
                 inputs=[sample_selector, gr.State(predictor)],
