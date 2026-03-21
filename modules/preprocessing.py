@@ -21,7 +21,7 @@ class BasePreprocessor(ABC):
     @abstractmethod
     def transform(self, df: pd.DataFrame):
         raise NotImplementedError()
-        
+ 
     def __repr__(self):
         return f"<{self.__class__.__name__}>"
 
@@ -39,7 +39,8 @@ class NumericalPreprocessor(BasePreprocessor):
     def __init__(self):
         self._num_cols = None
         self._scaler = StandardScaler()
-        self._imputer = SimpleImputer(strategy='mean')
+        # Use pandas fillna instead of sklearn imputer to avoid feature name issues
+        self._imputer = None  # Not used
         self.upper_bounds = None
         self.lower_bounds = None
         self._is_fitted = False
@@ -50,29 +51,39 @@ class NumericalPreprocessor(BasePreprocessor):
             num_data = df[self._num_cols]
             self.lower_bounds = num_data.quantile(0.05)
             self.upper_bounds = num_data.quantile(0.95)
+            # Store mean values for imputation
             clipped = num_data.clip(self.lower_bounds, self.upper_bounds, axis=1)
-            self._imputer.fit(clipped)
-            imputed = self._imputer.transform(num_data)
-            self._scaler.fit(imputed)
+            self._means = clipped.mean()
+            self._scaler.fit(clipped.fillna(self._means))
         except KeyError as e:
             raise KeyError(f"Missing numerical columns in data: {e}")
 
     def transform(self, df):
         try:
-            self._num_cols = df.select_dtypes(include='number').columns
+            # Use the columns that were fitted, not re-select from current df
             num_data = df[self._num_cols]
-            imputed = self._imputer.transform(num_data)
-            scaled = self._scaler.transform(imputed)
+            clipped = num_data.clip(self.lower_bounds, self.upper_bounds, axis=1)
+            imputed = clipped.fillna(self._means)
+            scaled = self._scaler.transform(imputed.values)
             return pd.DataFrame(scaled, columns=self._num_cols, index=df.index)
         except Exception as e:
             raise RuntimeError(f"Error during numerical transformation: {e}")
+
+    def __str__(self):
+        fitted_status = "fitted" if self._is_fitted else "not fitted"
+        num_cols = len(self._num_cols) if self._num_cols else 0
+        return f"NumericalPreprocessor({fitted_status}, {num_cols} columns)"
+
+    def __len__(self):
+        return len(self._num_cols) if self._num_cols else 0
 
 class CategoricalPreprocessor(BasePreprocessor):
     """Handles categorical feature preprocessing: imputation and one-hot encoding"""
     def __init__(self):
         self._cat_cols = None
         self._encoder = OneHotEncoder(sparse_output=True, handle_unknown='ignore')
-        self._imputer = SimpleImputer(strategy='most_frequent')
+        # Use pandas fillna instead of sklearn imputer
+        self._imputer = None  # Not used
         self._is_fitted = False
     def fit(self, df: pd.DataFrame):
         try:
@@ -83,21 +94,31 @@ class CategoricalPreprocessor(BasePreprocessor):
             # Only include columns with reasonable number of unique values
             self._cat_cols = [col for col in potential_cat_cols if df[col].nunique() <= 5]
             cat_data = df[self._cat_cols]
-            self._imputer.fit(cat_data)
-            imputed = self._imputer.transform(cat_data)
-            self._encoder.fit(imputed)
+            # Store mode values for imputation
+            self._modes = cat_data.mode().iloc[0] if not cat_data.empty else pd.Series(dtype=object)
+            filled_data = cat_data.fillna(self._modes)
+            self._encoder.fit(filled_data.values)
         except KeyError as e:
             raise KeyError(f"Missing categorical columns in data: {e}")
 
     def transform(self, df: pd.DataFrame):
         try:
+            # Use the columns that were fitted, not re-select from current df
             cat_data = df[self._cat_cols]
-            imputed = self._imputer.transform(cat_data)
-            encoded = self._encoder.transform(imputed)
+            filled_data = cat_data.fillna(self._modes)
+            encoded = self._encoder.transform(filled_data.values)
             feature_names = self._encoder.get_feature_names_out(self._cat_cols)
             return pd.DataFrame(encoded, columns=feature_names, index=df.index)
         except Exception as e:
             raise RuntimeError(f"Error during categorical transformation: {e}")
+
+    def __str__(self):
+        fitted_status = "fitted" if self._is_fitted else "not fitted"
+        cat_cols = len(self._cat_cols) if self._cat_cols else 0
+        return f"CategoricalPreprocessor({fitted_status}, {cat_cols} columns)"
+
+    def __len__(self):
+        return len(self._cat_cols) if self._cat_cols else 0
 
 class TextPreprocessor(BasePreprocessor):
     """Handles text feature preprocessing: cleaning and TF-IDF vectorization"""
@@ -130,6 +151,14 @@ class TextPreprocessor(BasePreprocessor):
         except Exception as e:
             raise RuntimeError(f"Error during text transformation: {e}")
 
+    def __str__(self):
+        fitted_status = "fitted" if self._is_fitted else "not fitted"
+        vocab_size = len(self._tfidf.vocabulary_) if hasattr(self._tfidf, 'vocabulary_') else 0
+        return f"TextPreprocessor({fitted_status}, vocab_size={vocab_size})"
+
+    def __len__(self):
+        return len(self._tfidf.vocabulary_) if hasattr(self._tfidf, 'vocabulary_') else 0
+
 class FeatureBuilder(BaseFeatureBuilder):
     """Combines multiple preprocessors to build final feature matrix"""
     def __init__(self, preprocessors):
@@ -144,11 +173,6 @@ class FeatureBuilder(BaseFeatureBuilder):
         try:
             features = []
             for p in self._preprocessors:
-                # Fit if not fitted and has fit method
-                if hasattr(p, 'fit') and not getattr(p, '_is_fitted',False):
-                    p.fit(df)
-                    p._is_fitted = True
-                
                 transformed = p.transform(df)
                 features.append(transformed)
             # Use sparse hstack if any feature is sparse

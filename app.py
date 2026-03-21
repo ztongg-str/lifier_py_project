@@ -8,8 +8,10 @@ import pickle
 import joblib
 from datetime import datetime
 
-# Add parent directory to path to import modules
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add current directory to path to import modules
+base_dir = os.path.dirname(os.path.abspath(__file__))
+if base_dir not in sys.path:
+    sys.path.append(base_dir)
 
 from modules.preprocessing import (
     NumericalPreprocessor,
@@ -32,8 +34,9 @@ class TriagePredictor:
         """
         self.model = None
         self.preprocessor = None
-        self.model_path = model_path
-        self.data_path = data_path
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        self.model_path = os.path.join(base_dir, model_path)
+        self.data_path = os.path.join(base_dir, data_path)
         self._load_artifacts()
     
     def _load_artifacts(self):
@@ -63,12 +66,24 @@ class TriagePredictor:
         try:
             input_df = pd.DataFrame([input_data])
             # Preprocess input data
-            processed_df = self.preprocessor.transform(input_df)  
+            if hasattr(self.preprocessor, 'build'):
+                processed_df = self.preprocessor.build(input_df)
+            else:
+                processed_df = self.preprocessor.transform(input_df)
+                
             # Predict
             prediction = self.model.predict(processed_df)[0]
+            
             # Get prediction probability
-            probabilities = self.model.predict_proba(processed_df)[0]
-            confidence = np.max(probabilities)
+            if hasattr(self.model, 'predict_proba'):
+                probabilities = self.model.predict_proba(processed_df)[0]
+                confidence = np.max(probabilities)
+            elif hasattr(self.model, 'model') and hasattr(self.model.model, 'predict_proba'):
+                probabilities = self.model.model.predict_proba(processed_df)[0]
+                confidence = np.max(probabilities)
+            else:
+                confidence = 1.0
+                
             acuity_map = {1: "Immediate", 2: "Very Urgent", 3: "Urgent", 4: "Semi-Urgent", 5: "Non-Urgent"}
             return acuity_map.get(prediction, f"Level {prediction}"), confidence
         except Exception as e:
@@ -79,7 +94,8 @@ def load_sample_data(dataset_name):
     """
     Load sample data from demo_data/ directory.
     """
-    data_dir = "demo_data"
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    data_dir = os.path.join(base_dir, "demo_data")
     file_path = os.path.join(data_dir, dataset_name)
     if not os.path.exists(file_path):
         return pd.DataFrame()
@@ -94,7 +110,8 @@ def create_sample_options():
     """
     Create sample data options for the dropdown.
     """
-    data_dir = "demo_data"
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    data_dir = os.path.join(base_dir, "demo_data")
     if not os.path.exists(data_dir):
         os.makedirs(data_dir, exist_ok=True)
         return []
