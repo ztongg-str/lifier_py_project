@@ -1,0 +1,2 @@
+age,heart_rate,systolic_bp,diastolic_bp,temperature_c,spo2,news2_score,respiratory_rate,shock_index,gcs_total,chief_complaint
+45,118,100,65,38.5,92,5,24,1.18,15,"Severe headache, vomiting, photophobia, stiff neck"

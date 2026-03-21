@@ -1,0 +1,2 @@
+age,heart_rate,systolic_bp,diastolic_bp,temperature_c,spo2,news2_score,respiratory_rate,shock_index,gcs_total,chief_complaint
+32,102,118,78,39.2,96,3,22,0.86,15,"Fever, productive cough, difficulty breathing for 2 days"

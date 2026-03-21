@@ -6,10 +6,9 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, classification_report, confusion_matrix
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report, confusion_matrix
 from sklearn.model_selection import cross_val_score
 from modules.config import IMG_PATH
-
 class BaseVisualizer(ABC):
     @abstractmethod
     def plot(self, *args, **kwargs):
@@ -30,30 +29,9 @@ def plot_confusion_matrix_percentages(cm, model_name):
     plt.savefig(f"{IMG_PATH}/confusion_matrix_{model_name}.png")
     plt.show()
 
-def plot_roc_curves(y_probas, model_names, y_test):
-    from sklearn.metrics import roc_curve, auc
-    plt.figure(figsize=(10, 8))
-    for y_proba, name in zip(y_probas, model_names):
-        if len(np.unique(y_test)) == 2:
-            fpr, tpr, _ = roc_curve(y_test, y_proba[:, 1])
-            roc_auc = auc(fpr, tpr)
-            plt.plot(fpr, tpr, label=f'{name} (AUC = {roc_auc:.2f})')
-        else:
-            # Multi-class, plot micro-average
-            fpr, tpr, _ = roc_curve(y_test, y_proba[:, 1], pos_label=1)  # Adjust for multi-class
-            roc_auc = auc(fpr, tpr)
-            plt.plot(fpr, tpr, label=f'{name} (AUC = {roc_auc:.2f})')
-    plt.plot([0, 1], [0, 1], 'k--')
-    plt.xlim([0.0, 1.0])
-    plt.ylim([0.0, 1.05])
-    plt.xlabel('False Positive Rate')
-    plt.ylabel('True Positive Rate')
-    plt.title('ROC Curves')
-    plt.legend(loc="lower right")
-    plt.savefig(f"{IMG_PATH}/roc_curves.png")
-    plt.show()
 
 class ModelEvaluator:
+    """Evaluates machine learning models with various metrics"""
     def __init__(self):
         self.results = []
 
@@ -62,13 +40,6 @@ class ModelEvaluator:
         y_proba = None
         if hasattr(model, 'predict_proba'):
             y_proba = model.predict_proba(X_test)
-            if len(np.unique(y_test)) == 2:
-                auc = roc_auc_score(y_test, y_proba[:, 1])
-            else:
-                auc = roc_auc_score(y_test, y_proba, multi_class='ovr')
-        else:
-            auc = None
-
         acc = accuracy_score(y_test, y_pred)
         prec = precision_score(y_test, y_pred, average='weighted')
         rec = recall_score(y_test, y_pred, average='weighted')
@@ -80,7 +51,6 @@ class ModelEvaluator:
             'Precision': prec,
             'Recall': rec,
             'F1-Score': f1,
-            'ROC-AUC': auc
         }
         self.results.append(result)
 
@@ -105,13 +75,11 @@ class ModelEvaluator:
                 y_probas.append(model.predict_proba(X_test))
                 model_names.append(name)
 
-        # Plot ROC if applicable
-        if y_probas:
-            plot_roc_curves(y_probas, model_names, y_test)
 
         return pd.DataFrame(results)
 
 class ModelExporter:
+    """Exports trained models to disk"""
     """Object-oriented model exporter to rank and save models."""
     def __init__(self, output_dir=None):
         import os
@@ -132,8 +100,7 @@ class ModelExporter:
         try:
             if results_df.empty:
                 raise ValueError("Results dataframe is empty.")
-            
-            # Rank models by metric in descending order
+            # Rank models by metric from best to worst
             ranked_df = results_df.sort_values(by=metric, ascending=False)
             best_model_name = ranked_df.iloc[0]['Model']
             best_score = ranked_df.iloc[0][metric]

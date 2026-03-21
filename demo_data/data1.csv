@@ -1,0 +1,2 @@
+age,heart_rate,systolic_bp,diastolic_bp,temperature_c,spo2,news2_score,respiratory_rate,shock_index,gcs_total,chief_complaint
+68,132,85,50,37.8,88,7,28,1.55,13,"Chest pain radiating to left arm, diaphoresis, shortness of breath"
