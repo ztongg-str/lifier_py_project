@@ -65,6 +65,22 @@ class TriagePredictor:
         
         try:
             input_df = pd.DataFrame([input_data])
+            
+            # Auto-fill missing columns expected by the preprocessor with NaNs
+            if hasattr(self.preprocessor, '_preprocessors'):
+                for p in self.preprocessor._preprocessors:
+                    if hasattr(p, '_num_cols') and p._num_cols is not None:
+                        for col in p._num_cols:
+                            if col not in input_df.columns:
+                                input_df[col] = np.nan
+                    if hasattr(p, '_cat_cols') and p._cat_cols is not None:
+                        for col in p._cat_cols:
+                            if col not in input_df.columns:
+                                input_df[col] = np.nan
+            
+            # Ensure chief_complaint_raw exists for FeatureBuilder's ESI logic
+            if 'chief_complaint_raw' not in input_df.columns:
+                input_df['chief_complaint_raw'] = input_df.get('chief_complaint', '')
             # Preprocess input data
             if hasattr(self.preprocessor, 'build'):
                 processed_df = self.preprocessor.build(input_df)
@@ -160,7 +176,8 @@ def predict_single_input(age, heart_rate, systolic_bp, temperature, spo2, news2_
         'news2_score': news2_score,
         'respiratory_rate': respiratory_rate,
         'shock_index': shock_index,
-        'chief_complaint': chief_complaint
+        'chief_complaint': chief_complaint,
+        'chief_complaint_raw': chief_complaint
     }
     
     acuity, confidence = predictor.predict(input_data)
