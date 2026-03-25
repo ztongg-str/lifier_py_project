@@ -1,0 +1,2 @@
+age,heart_rate,systolic_bp,diastolic_bp,temperature_c,spo2,news2_score,respiratory_rate,shock_index,gcs_total,chief_complaint
+28,92,125,82,38.1,97,2,18,0.74,15,"Right ankle swelling and pain after twisting injury yesterday"

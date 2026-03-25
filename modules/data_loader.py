@@ -3,12 +3,13 @@
 
 import pandas as pd
 import os
-from modules.config import DATA_DIR, CHIEF_COMPLAINT_FILENAME, PATIENT_HISTORY_FILENAME, SAMPLE_SUBMISSION_FILENAME, TEST_FILENAME, TRAIN_FILENAME
+from modules.config import *
 
 def get_file_path(filename):
     return os.path.join(DATA_DIR, filename)
 
 def load_data():
+    """Load and merge all dataset files"""
     try:
         chief_complaint_data = pd.read_csv(get_file_path(CHIEF_COMPLAINT_FILENAME))
         patient_history_data = pd.read_csv(get_file_path(PATIENT_HISTORY_FILENAME))
@@ -24,9 +25,6 @@ def load_data():
         
         # Add comorbidity_count
         hx_cols = [col for col in train_data.columns if col.startswith('hx_')]
-        train_data['comorbidity_count'] = train_data[hx_cols].sum(axis=1)
-        test_data['comorbidity_count'] = test_data[hx_cols].sum(axis=1)
-        
         return chief_complaint_data, patient_history_data, train_data, test_data, sample_submission_data
     except FileNotFoundError as e:
         raise FileNotFoundError(f"Data file not found: {e}")

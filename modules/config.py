@@ -12,7 +12,6 @@ if not os.path.exists(IMG_PATH):
 # Constants
 SEED = 42
 TARGET = "triage_acuity"
-PATIENT_ID = "patient_id"
 
 # File names
 CHIEF_COMPLAINT_FILENAME = "chief_complaints.csv"
@@ -20,18 +19,15 @@ PATIENT_HISTORY_FILENAME = "patient_history.csv"
 SAMPLE_SUBMISSION_FILENAME = "sample_submission.csv"
 TEST_FILENAME = "test.csv"
 TRAIN_FILENAME = "train.csv"
+ESI_DICT = os.path.join(DATA_DIR,'esi_dictionary.json')
 
 # Model parameters
-TFIDF_MAX_FEATURES = 100
-SELECT_K_BEST = 50
-SMOTE_K_NEIGHBORS = 5
+TFIDF_MAX_FEATURES = 50
+SMOTE_K_NEIGHBORS = 3
 
 # Additional defaults used by OOP pipeline
-BP_COLS = ['systolic_bp', 'diastolic_bp']
-KEY_VITALS = ['systolic_bp', 'diastolic_bp', 'heart_rate', 'temperature_c', 'spo2', 'respiratory_rate']
-N_FEATURES_SELECT = SELECT_K_BEST
 TEST_SIZE = 0.2
-LEAKAGE_COLS = ['ed_los_hours', 'disposition']
+LEAKAGE_COLS = ['ed_los_hours', 'disposition','news2_score',"patient_id"]
 
 # Model hyperparameters for ModelTrainer
 LR_PARAMS = {
@@ -47,11 +43,11 @@ RF_PARAMS = {
     'n_jobs': -1
 }
 
-GB_PARAMS = {
+XG_PARAMS = {
     'n_estimators': 100,
     'random_state': SEED,
-    'learning_rate': 0.1,
-    'max_depth': 5
+    "objective":'multi:softmax',
+    "num_class":5
 }
 
 # Visualization
